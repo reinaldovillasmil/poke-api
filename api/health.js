@@ -20,7 +20,7 @@ module.exports = async (req, res) => {
 
   // 1. Env vars — instant, no network
   const env = {
-    poketcgApiKey: !!process.env.POKETCG_API_KEY,
+    poketcgApiKey: process.env.POKETCG_API_KEY ? 'set' : 'not set (optional — free public tier active)',
     kvConfigured:  !!process.env.KV_REST_API_URL && !!process.env.KV_REST_API_TOKEN,
   };
 
