@@ -128,37 +128,47 @@ module.exports = async (req, res) => {
     });
   }
 
-  const prompt = `You are an expert Pokémon TCG investment analyst with deep knowledge of collector markets, price history, set lifecycles, and artistic value. Analyze this card and return ONLY a valid JSON object — no markdown fences, no preamble, just raw JSON starting with {.
+  const prompt = `You are an expert Pokemon TCG investment analyst. Analyze this card and return ONLY a valid JSON object. No markdown fences, no preamble, just raw JSON starting with {.
 
-CARD DETAILS:
+STRICT ANTI-HALLUCINATION RULES:
+1. NEVER invent card names, set names, prices, or sale histories. If uncertain about a specific comparable, describe the pattern in general terms instead.
+2. Do NOT name other specific cards unless you are 100% certain they exist exactly as named in the official TCG.
+3. Base ALL price reasoning ONLY on the benchmarks provided below — do not add external price data you may be uncertain about.
+4. For the comparable card field: only name a card if you are completely certain it is real. If unsure, use a blank string and explain the archetype pattern instead.
+
+CARD:
 - Name: ${name}
 - Rarity: ${rarity || 'Unknown'}
 - Set: ${set || 'Unknown'}
-- Artist: ${artist || 'Unknown'}${artistInfo ? ` (Tier ${artistInfo.tier} artist — ${artistInfo.note})` : ' (artist not in tier database)'}
-- Current Market Price: ${price ? '$' + parseFloat(price).toFixed(2) : 'Unknown'}
+- Artist: ${artist || 'Unknown'}${artistInfo ? ' (Tier ' + artistInfo.tier + ' — ' + artistInfo.note + ')' : ' (artist not in tier database)'}
+- Market Price: ${price ? '$' + parseFloat(price).toFixed(2) : 'Unknown'}
 - Investment Score: ${score || '?'}/100
-- Lifecycle Stage: ${lifecycleLabel || 'Unknown'}
-- Price Benchmarks: Floor $${floor||'?'} / Fair Value $${fair||'?'} / Ceiling $${ceil||'?'} / Peak Comp $${peak||'?'}
+- Lifecycle: ${lifecycleLabel || 'Unknown'}
+- Benchmarks: Floor $${floor||'?'} / Fair $${fair||'?'} / Ceiling $${ceil||'?'} / Peak $${peak||'?'}
 
-Return this exact JSON — fill every field, no nulls:
+Return this exact JSON, fill every field:
 {
-  "thesis": "4 sentences. Specific investment reasoning for THIS exact card: reference the lifecycle stage, current price vs benchmarks, Pokemon/trainer popularity, and name a real comparable card that followed a similar trajectory. End with a clear verdict: buy now / accumulate on dips / wait for trough / avoid.",
+  "thesis": "4 sentences. Cover: (1) what the lifecycle stage means for timing right now, (2) current price vs the provided benchmarks only — no invented data, (3) this Pokemon or trainer collector appeal in general terms, (4) clear verdict: buy now / accumulate on dips / wait for trough / avoid. Zero invented card names or prices.",
+  "comparable": {
+    "name": "Name of a real verified card you are 100% certain exists — like Charizard ex Special Illustration Rare or Umbreon VMAX Alternate Art. Empty string if any doubt.",
+    "reason": "1 sentence why this is a relevant comparable by collector archetype or trajectory — no invented price history.",
+    "tcgplayerUrl": "https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(name.split(' ')[0])}&view=grid"
+  },
   "artScore": {
     "score": 75,
     "artistTier": "A",
     "style": "Painterly Illustration",
     "uniqueness": "High",
     "communityReception": "Well Received",
-    "reasoning": "2 sentences — assess this specific artwork's quality, style, and how the artist tier affects long-term collector demand and price ceiling for this card."
+    "reasoning": "2 sentences on this artwork quality, style, and how artist tier affects long-term collector demand."
   },
   "reprintRisk": {
     "level": "Low",
     "score": 20,
-    "reasoning": "2-3 sentences — assess reprint risk based on: how often this Pokemon/trainer has appeared in SIRs in the SV era, any announced upcoming sets featuring them, and whether JP-exclusive cards typically get EN equivalents.",
-    "factors": ["Specific factor 1", "Specific factor 2", "Specific factor 3"]
+    "reasoning": "2-3 sentences on reprint likelihood based on rarity type and how frequently this Pokemon or trainer archetype appears in SIRs. Do not cite specific unverified announcements.",
+    "factors": ["Factor 1", "Factor 2"]
   }
 }`;
-
   try {
     const response = await fetchWithTimeout(ANTHROPIC_URL, {
       method: 'POST',
