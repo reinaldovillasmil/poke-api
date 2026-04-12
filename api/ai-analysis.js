@@ -1,15 +1,15 @@
 // api/ai-analysis.js
-// GET /api/ai-analysis?name=...&rarity=...&set=...&artist=...&price=...
-//     &score=...&lifecycleLabel=...&floor=...&fair=...&ceil=...&peak=...
+// Calls Anthropic Claude via Vercel backend — works on any device.
+// Uses claude-haiku-4-5 (fastest, cheapest, great for structured JSON)
+// ~$0.001 per card analysis. $5 = ~5,000 analyses.
+// Cached 24hrs at Vercel edge so repeat opens are free.
 //
-// Uses Google Gemini API (free tier — 15 req/min, 1M tokens/day)
-// Add GEMINI_API_KEY to Vercel environment variables.
-// Get a free key at: aistudio.google.com
-// Cached 24 hours per card.
+// Setup: Add ANTHROPIC_API_KEY to Vercel environment variables.
+// Get key at: console.anthropic.com → API Keys → Create Key
 
 const fetch = require('node-fetch');
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 
 const ARTIST_TIERS = {
   'Mitsuhiro Arita':  { tier:'S', note:'Original Base Set artist. Massive nostalgia premium. 2–3x vs typical artist.' },
@@ -28,7 +28,7 @@ const ARTIST_TIERS = {
   'Taiga Kasai':      { tier:'A', note:'Dramatic lighting and composition.' },
   'Sanosuke Sakuma':  { tier:'A', note:'Strong character work. Consistent auction performance.' },
   'Eske Yoshinob':    { tier:'A', note:'Unique artistic vision. Growing following.' },
-  '5ban Graphics':    { tier:'B', note:'3D CGI style. Professional but lower collector premium than painterly illustration.' },
+  '5ban Graphics':    { tier:'B', note:'3D CGI style. Professional but lower collector premium than painterly.' },
   'Planeta CG Works': { tier:'B', note:'Clean 3D renders. Lower collector appeal vs painterly.' },
   'Ryo Ueda':         { tier:'B', note:'Clean professional work. Moderate collector interest.' },
   'Kagemaru Himeno':  { tier:'B', note:'Classic TCG style. Nostalgic for veteran collectors.' },
@@ -37,12 +37,66 @@ const ARTIST_TIERS = {
 function getArtistInfo(artistName) {
   if (!artistName) return null;
   for (const [name, info] of Object.entries(ARTIST_TIERS)) {
-    if (artistName.toLowerCase().includes(name.toLowerCase())) return { name, ...info };
+    if (artistName.toLowerCase().includes(name.toLowerCase())) {
+      return { name, ...info };
+    }
   }
   return null;
 }
 
-function fetchWithTimeout(url, options, ms = 20000) {
+function buildFallback(name, artist, price, lifecycleLabel, floor, fair, ceil) {
+  const artistInfo = getArtistInfo(artist || '');
+  const mkt  = parseFloat(price) || 0;
+  const fv   = parseFloat(fair)  || 0;
+  const flr  = parseFloat(floor) || 0;
+
+  const inBuy = (lifecycleLabel || '').includes('BUY');
+  const tooNew = (lifecycleLabel || '').includes('Wait') || (lifecycleLabel || '').includes('New');
+
+  let thesis = '';
+  if (inBuy && mkt > 0 && mkt < fv) {
+    thesis = `${name} is in the buy zone at $${mkt.toFixed(2)}, below its estimated fair value of $${fv}. This lifecycle stage historically precedes price recovery as pack supply tightens. The risk/reward is favorable for accumulating at current prices. Hold target is fair value ($${fv}) with a longer-term ceiling of $${ceil || '?'}.`;
+  } else if (tooNew) {
+    thesis = `${name} at $${mkt.toFixed(2)} is from a set that is too new to buy. Prices typically drop 15–40% in the first 3 months before stabilizing. Set a price alert at the floor ($${flr}) and wait for the trough before entering.`;
+  } else if (mkt > fv && fv > 0) {
+    thesis = `${name} at $${mkt.toFixed(2)} is trading above its estimated fair value of $${fv}. This is not a strong entry point — wait for a pullback toward the $${flr} floor before buying. The thesis only works at the right price.`;
+  } else {
+    thesis = `${name} is trading at $${mkt.toFixed(2)} against a floor of $${flr} and fair value of $${fv}. Monitor the set lifecycle and watch for eBay price trends to confirm direction before committing. AI analysis temporarily unavailable — this is a rule-based estimate.`;
+  }
+
+  const artScore = {
+    score: artistInfo?.tier === 'S' ? 92 : artistInfo?.tier === 'A' ? 78 : artistInfo?.tier === 'B' ? 60 : 52,
+    artistTier: artistInfo?.tier || 'Unknown',
+    style: artistInfo?.tier === 'B' ? '3D CGI Render' : 'Hand-Painted Illustration',
+    uniqueness: artistInfo?.tier === 'S' ? 'High' : artistInfo?.tier === 'A' ? 'Medium' : 'Low',
+    communityReception: artistInfo?.tier === 'S' ? 'Highly Acclaimed' : artistInfo?.tier === 'A' ? 'Well Received' : 'Neutral',
+    reasoning: artistInfo
+      ? `${artistInfo.name} is a Tier ${artistInfo.tier} artist — ${artistInfo.note} This directly affects the card's long-term collector premium.`
+      : `Artist "${artist || 'Unknown'}" is not in our tier database. Score estimated from rarity tier only.`,
+  };
+
+  const highRisk = ['Charizard','Pikachu','Eevee','Mewtwo','Gardevoir'];
+  const lowRisk  = ['Cynthia','Misty','Lillie','N ','Brock','Lugia','Umbreon'];
+  const isHigh   = highRisk.some(p => name.includes(p));
+  const isLow    = lowRisk.some(p  => name.includes(p));
+
+  const reprintRisk = {
+    level: isHigh ? 'High' : isLow ? 'Low' : 'Medium',
+    score: isHigh ? 72 : isLow ? 18 : 42,
+    reasoning: isHigh
+      ? `${name.split(' ')[0]} appears in multiple SIRs per year — The Pokémon Company consistently reprints popular Pokémon to meet demand. Each new version competes with existing ones and can suppress appreciation.`
+      : isLow
+      ? `${name.split(' ')[0]} has appeared infrequently in SIR format. Trainer SIRs are rarely directly reprinted and tend to appreciate independently of new releases.`
+      : `Moderate reprint risk. Monitor upcoming set announcements — a new SIR of the same Pokémon typically causes a 15–30% dip in existing versions.`,
+    factors: isHigh
+      ? ['Appears in 3+ SIRs in the SV era', 'High demand drives frequent reprints', 'New versions compete for the same collector dollar']
+      : ['Watch JP set announcements for EN equivalents', 'Rotation does not affect collector demand'],
+  };
+
+  return { thesis, artScore, reprintRisk, artistInfo, isFallback: true };
+}
+
+function fetchWithTimeout(url, options, ms = 25000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
   return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(t));
@@ -56,110 +110,108 @@ module.exports = async (req, res) => {
     lifecycleLabel, floor, fair, ceil, peak,
   } = req.query;
 
-  if (!name) { res.status(400).json({ success: false, error: 'Missing ?name=' }); return; }
-
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (!geminiKey) {
-    res.status(200).json({
-      success: false,
-      error: 'GEMINI_API_KEY not set. Add it to Vercel environment variables. Get a free key at aistudio.google.com.',
-      thesis: null, artScore: null, reprintRisk: null,
-    });
+  if (!name) {
+    res.status(400).json({ success: false, error: 'Missing ?name=' });
     return;
   }
 
+  const apiKey     = process.env.ANTHROPIC_API_KEY;
   const artistInfo = getArtistInfo(artist || '');
 
-  const prompt = `You are an expert Pokémon TCG investment analyst with deep knowledge of the collector market, price history, and artistic value. Analyze this card and return ONLY a valid JSON object — no markdown fences, no explanation, just raw JSON.
+  // No API key — serve rule-based fallback immediately
+  if (!apiKey) {
+    const fb = buildFallback(name, artist, price, lifecycleLabel, floor, fair, ceil);
+    res.setHeader('Cache-Control', 's-maxage=3600');
+    return res.status(200).json({
+      success: true, cardName: name, ...fb,
+      note: 'Add ANTHROPIC_API_KEY to Vercel environment variables for AI analysis.',
+    });
+  }
+
+  const prompt = `You are an expert Pokémon TCG investment analyst with deep knowledge of collector markets, price history, set lifecycles, and artistic value. Analyze this card and return ONLY a valid JSON object — no markdown fences, no preamble, just raw JSON starting with {.
 
 CARD DETAILS:
 - Name: ${name}
 - Rarity: ${rarity || 'Unknown'}
 - Set: ${set || 'Unknown'}
-- Artist: ${artist || 'Unknown'}${artistInfo ? ` (Tier ${artistInfo.tier} artist — ${artistInfo.note})` : ' (artist tier unknown)'}
+- Artist: ${artist || 'Unknown'}${artistInfo ? ` (Tier ${artistInfo.tier} artist — ${artistInfo.note})` : ' (artist not in tier database)'}
 - Current Market Price: ${price ? '$' + parseFloat(price).toFixed(2) : 'Unknown'}
 - Investment Score: ${score || '?'}/100
 - Lifecycle Stage: ${lifecycleLabel || 'Unknown'}
-- Benchmarks: Floor $${floor||'?'} / Fair Value $${fair||'?'} / Ceiling $${ceil||'?'} / Peak Comp $${peak||'?'}
+- Price Benchmarks: Floor $${floor||'?'} / Fair Value $${fair||'?'} / Ceiling $${ceil||'?'} / Peak Comp $${peak||'?'}
 
-Return this exact JSON structure with no additional text:
+Return this exact JSON — fill every field, no nulls:
 {
-  "thesis": "4 sentences maximum. Specific investment reasoning for THIS card. Reference the lifecycle stage, price vs benchmarks, Pokemon popularity, and name a comparable card that followed a similar trajectory. Be direct about whether to buy, wait, or avoid and exactly why.",
+  "thesis": "4 sentences. Specific investment reasoning for THIS exact card: reference the lifecycle stage, current price vs benchmarks, Pokemon/trainer popularity, and name a real comparable card that followed a similar trajectory. End with a clear verdict: buy now / accumulate on dips / wait for trough / avoid.",
   "artScore": {
     "score": 75,
     "artistTier": "A",
-    "style": "Painterly",
+    "style": "Painterly Illustration",
     "uniqueness": "High",
     "communityReception": "Well Received",
-    "reasoning": "2 sentences on this specific artwork quality and how the artist tier affects long-term collector demand for this card."
+    "reasoning": "2 sentences — assess this specific artwork's quality, style, and how the artist tier affects long-term collector demand and price ceiling for this card."
   },
   "reprintRisk": {
     "level": "Low",
     "score": 20,
-    "reasoning": "2-3 sentences. Reference how frequently this specific Pokemon or trainer has appeared in SIRs recently, any announced sets, and whether a JP-exclusive card might get an EN equivalent.",
-    "factors": ["Specific factor 1", "Specific factor 2"]
+    "reasoning": "2-3 sentences — assess reprint risk based on: how often this Pokemon/trainer has appeared in SIRs in the SV era, any announced upcoming sets featuring them, and whether JP-exclusive cards typically get EN equivalents.",
+    "factors": ["Specific factor 1", "Specific factor 2", "Specific factor 3"]
   }
 }`;
 
   try {
-    const response = await fetchWithTimeout(
-      `${GEMINI_URL}?key=${geminiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.4,
-            maxOutputTokens: 900,
-            responseMimeType: 'application/json',
-          },
-        }),
+    const response = await fetchWithTimeout(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type':    'application/json',
+        'x-api-key':       apiKey,
+        'anthropic-version': '2023-06-01',
       },
-      20000
-    );
+      body: JSON.stringify({
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        messages:   [{ role: 'user', content: prompt }],
+      }),
+    }, 25000);
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`Gemini ${response.status}: ${errText.slice(0, 200)}`);
+      throw new Error(`Anthropic ${response.status}: ${errText.slice(0, 300)}`);
     }
 
     const data = await response.json();
+    const raw  = (data.content?.[0]?.text || '').trim();
+    if (!raw) throw new Error('Empty response from Claude');
 
-    // Extract text from Gemini response structure
-    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    if (!raw) throw new Error('Empty response from Gemini');
-
-    // Clean and parse — strip any accidental markdown fences
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    // Robust JSON extraction — strip any accidental markdown
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
     const s = cleaned.indexOf('{');
     const e = cleaned.lastIndexOf('}');
-    if (s === -1 || e === -1) throw new Error('No JSON object found in Gemini response');
+    if (s === -1 || e === -1) throw new Error('No JSON object in response');
 
     const analysis = JSON.parse(cleaned.slice(s, e + 1));
-
-    // Validate required fields
     if (!analysis.thesis) throw new Error('Missing thesis in response');
 
     res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=172800');
     res.status(200).json({
-      success: true,
-      cardName: name,
+      success:     true,
+      cardName:    name,
       artistInfo,
-      thesis:       analysis.thesis      || null,
-      artScore:     analysis.artScore    || null,
-      reprintRisk:  analysis.reprintRisk || null,
+      thesis:      analysis.thesis,
+      artScore:    analysis.artScore    || null,
+      reprintRisk: analysis.reprintRisk || null,
+      isFallback:  false,
       generatedAt: new Date().toISOString(),
     });
 
   } catch (err) {
     console.error('[/api/ai-analysis]', err.message);
-    res.status(500).json({
-      success: false,
+    // Always return something useful — never a blank screen
+    const fb = buildFallback(name, artist, price, lifecycleLabel, floor, fair, ceil);
+    res.setHeader('Cache-Control', 's-maxage=300');
+    res.status(200).json({
+      success: true, cardName: name, ...fb,
       error: err.message,
-      thesis: null,
-      artScore: null,
-      reprintRisk: null,
     });
   }
 };
