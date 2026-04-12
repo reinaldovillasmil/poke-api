@@ -1,7 +1,7 @@
 {
   "name": "pokeinvest-api",
-  "version": "2.0.0",
-  "description": "PokeInvest backend — real pull rates, eBay price history, investment scoring",
+  "version": "3.0.0",
+  "description": "PokeInvest backend v3 — AI-powered card investment scoring",
   "dependencies": {
     "node-fetch": "^2.7.0",
     "cheerio": "^1.0.0"
