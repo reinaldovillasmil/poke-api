@@ -11,6 +11,7 @@
 
 const { fetchSecretRares } = require('../lib/poketcg');
 const { scoreCard, getBenchmarks, getDemandScore, isSetOOP } = require('../lib/scoring');
+const { getCharacterProfile } = require('../lib/characters');
 
 const SECRET_RARITIES = ['Special Illustration Rare', 'Illustration Rare', 'Hyper Rare'];
 
@@ -34,7 +35,8 @@ function buildCard(card) {
     price: card.marketPrice, supertype: card.supertype,
   });
   const demandScore = getDemandScore(card.name);
-  const bench = getBenchmarks(card.rarity, demandScore, card.supertype === 'Trainer');
+  const isTrainer = card.supertype === 'Trainer';
+  const bench = getBenchmarks(card.rarity, demandScore, isTrainer, card.name);
   const cardNo = card.number ? `${card.number}/${card.set.printedTotal || '?'}` : null;
   const ebayQuery = [card.name, cardNo, card.set.name, card.rarity].filter(Boolean).join(' ');
   return {
@@ -43,6 +45,8 @@ function buildCard(card) {
     playabilityContext: s.playabilityContext, playabilityLabel: s.playabilityLabel,
     recommendation: s.recommendation, lifecycleLabel: s.lifecycleLabel,
     breakdown: s.breakdown, benchmarks: bench, upside: s.upside,
+    collectorTier: s.collectorTier, characterNotes: s.characterNotes,
+    reprintRiskScore: s.reprintRiskScore,
     isOOP: isSetOOP(card.set.id), ebayQuery,
   };
 }
