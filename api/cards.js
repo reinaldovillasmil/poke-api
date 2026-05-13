@@ -17,10 +17,17 @@ const SECRET_RARITIES = [
   'Special Illustration Rare',
   'Illustration Rare',
   'Hyper Rare',
-  // SWSH era and older (rainbow, gold, full art trainers, BW/XY secrets)
+  // SWSH era — rainbow/gold/secret + Full Art V/VMAX/VSTAR
   'Rainbow Rare',
   'Secret Rare',
   'Full Art',
+  'Rare Holo VMAX',       // Umbreon VMAX, Charizard VMAX Alt Art etc.
+  'Rare Holo VSTAR',      // Charizard VSTAR, Arceus VSTAR etc.
+  'Trainer Gallery Rare Holo', // Crown Zenith & Brilliant Stars trainer gallery
+  // SM era — GX Full Arts, Tag Teams, Rainbow Rares, Hidden Fates shinies
+  'Rare Ultra',           // THE big one: BW/XY/SM Full Art EX/GX/V + trainer FAs
+  'Rare Rainbow',         // SM-era rainbow rares (Charizard-GX rainbow etc.)
+  'Rare Shiny GX',        // Hidden Fates Shiny Vault GX cards
 ];
 
 // Full rotation of fetch configs — 6 are randomly sampled per pool build
@@ -32,9 +39,11 @@ const ALL_POOL_CONFIGS = [
   { apiSort: '-set.releaseDate', apiPage: 3 },
   { apiSort: '-set.releaseDate', apiPage: 4 },
   { apiSort: '-set.releaseDate', apiPage: 5 },
-  // Oldest-first: directly surfaces vintage and SWSH-era cards
+  // Oldest-first: pages 1–4 go from vintage BW/XY through SM and into SWSH
   { apiSort: 'set.releaseDate',  apiPage: 1 },
   { apiSort: 'set.releaseDate',  apiPage: 2 },
+  { apiSort: 'set.releaseDate',  apiPage: 3 },
+  { apiSort: 'set.releaseDate',  apiPage: 4 },
   // Name A–Z / Z–A across two pages each = four different alphabet windows
   { apiSort: 'name',  apiPage: 1 },
   { apiSort: 'name',  apiPage: 2 },
