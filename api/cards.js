@@ -56,17 +56,17 @@ const MIXED_CONFIGS = [            // name / set / number sorts — mixes all er
   { apiSort: '-set.name', apiPage: 1 },
 ];
 
-// Always 2 modern + 2 older + 2 mixed = 6 fetches, ~864 req/day at 10-min TTL
+// 3 modern + 3 older + 4 mixed = 10 fetches, 20-min TTL → 10×72 = 720 req/day
 function selectConfigs() {
   return [
-    ...fisherYates([...MODERN_CONFIGS]).slice(0, 2),
-    ...fisherYates([...OLDER_CONFIGS]).slice(0, 2),
-    ...fisherYates([...MIXED_CONFIGS]).slice(0, 2),
+    ...fisherYates([...MODERN_CONFIGS]).slice(0, 3),
+    ...fisherYates([...OLDER_CONFIGS]).slice(0, 3),
+    ...fisherYates([...MIXED_CONFIGS]).slice(0, 4),
   ];
 }
 
-const POOL_TTL   = 10 * 60 * 1000; // 10 minutes (~864 API calls/day)
-const SAMPLE_SIZE = 150;            // cards returned per request
+const POOL_TTL    = 20 * 60 * 1000; // 20 minutes (720 API calls/day, under free limit)
+const SAMPLE_SIZE = 150;             // max cards returned when no filters active
 
 let _pool          = [];
 let _poolFetchedAt = 0;
@@ -151,6 +151,11 @@ function buildCard(card) {
 module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
   try {
+    // ?rebuild=1 forces the pool to rebuild immediately (used by shuffle button)
+    if (req.query.rebuild === '1' && !_poolBuilding) {
+      _poolFetchedAt = 0;
+    }
+
     const pool = await getPool();
 
     // Apply filters on the full pool
@@ -166,10 +171,13 @@ module.exports = async (req, res) => {
     if (maxPrice < 99999)   filtered = filtered.filter(c => !c.marketPrice || c.marketPrice <= maxPrice);
     if (hiddenGems === '1') filtered = filtered.filter(c => c.isHiddenGem);
 
-    // Randomly sample so each request surfaces different cards
-    const sample = filtered.length > SAMPLE_SIZE
-      ? fisherYates(filtered).slice(0, SAMPLE_SIZE)
-      : fisherYates(filtered);
+    // When filters are active, return the ENTIRE filtered pool — the user explicitly
+    // narrowed the universe so show everything that matches, not a random slice.
+    // Without filters, randomly sample to keep response size reasonable.
+    const filtersActive = minScore > 0 || minPrice > 0 || maxPrice < 99999 || rarity || hiddenGems;
+    const sample = filtersActive
+      ? fisherYates(filtered)
+      : (filtered.length > SAMPLE_SIZE ? fisherYates(filtered).slice(0, SAMPLE_SIZE) : fisherYates(filtered));
 
     // Sort within the random sample
     const validSorts = ['score','price','upside','new'];
