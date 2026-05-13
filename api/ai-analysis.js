@@ -31,10 +31,15 @@ const ARTIST_TIERS = {
   'Kagemaru Himeno':  {tier:'B',note:'Classic TCG style. Nostalgic for veteran collectors.'},
 };
 
+function matchesName(cardName, key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('\\b' + escaped + '\\b', 'i').test(cardName);
+}
+
 function getArtistInfo(n) {
   if (!n) return null;
   for (const [k, v] of Object.entries(ARTIST_TIERS)) {
-    if (n.toLowerCase().includes(k.toLowerCase())) return { name: k, ...v };
+    if (matchesName(n, k)) return { name: k, ...v };
   }
   return null;
 }
@@ -96,11 +101,12 @@ function buildFallback(name, artist, price, lifecycleLabel, floor, fair, ceil) {
 module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
-  const { name, rarity, set, artist, price, score, lifecycleLabel, floor, fair, ceil, peak } = req.query;
+  const { name, rarity, set, artist, price, score, lifecycleLabel, floor, fair, ceil, peak, characterNotes, collectorTier, cardNumber } = req.query;
   if (!name) { res.status(400).json({ success: false, error: 'Missing ?name=' }); return; }
 
   const apiKey     = process.env.ANTHROPIC_API_KEY;
   const artistInfo = getArtistInfo(artist || '');
+  const firstName  = (name || '').split(' ')[0];
 
   if (!apiKey) {
     console.log(`[ai-analysis] No ANTHROPIC_API_KEY — fallback for: ${name}`);
@@ -111,36 +117,38 @@ module.exports = async (req, res) => {
     });
   }
 
-  const prompt = `You are an expert Pokémon TCG investment analyst. Return ONLY a valid JSON object — no markdown, no preamble.
+  const prompt = `You are a Pokémon TCG collector and investment analyst. Write a candid, specific take on this exact card — not a template, not a category analysis. Return ONLY valid JSON, no markdown.
 
-RULES:
-1. Never invent card names, prices, or sales data not provided below.
-2. Use ONLY the benchmarks given for price reasoning.
-3. Only name a comparable card if 100% certain it exists exactly as named.
-
-CARD:
-- Name: ${name}
+CARD DETAILS:
+- Full name: ${name}
 - Rarity: ${rarity || 'Unknown'}
-- Set: ${set || 'Unknown'}
-- Artist: ${artist || 'Unknown'}${artistInfo ? ` (Tier ${artistInfo.tier} — ${artistInfo.note})` : ''}
-- Price: ${price ? '$' + parseFloat(price).toFixed(2) : 'No price data'}
-- Score: ${score || '?'}/100
-- Lifecycle: ${lifecycleLabel || 'Unknown'}
-- Floor: $${floor||'?'} / Fair: $${fair||'?'} / Ceiling: $${ceil||'?'} / Peak: $${peak||'?'}
+- Set: ${set || 'Unknown'}${cardNumber ? ` (card ${cardNumber})` : ''}
+- Artist: ${artist || 'Unknown'}${artistInfo ? ` — ${artistInfo.note}` : ''}
+- Current market price: ${price ? '$' + parseFloat(price).toFixed(2) : 'no price data'}
+- Investment score: ${score || '?'}/100
+- Lifecycle stage: ${lifecycleLabel || 'Unknown'}
+- Estimated benchmarks: Floor $${floor||'?'} / Fair $${fair||'?'} / Ceiling $${ceil||'?'} / Peak $${peak||'?'}${characterNotes ? `\n- Character context: ${characterNotes}` : ''}${collectorTier ? `\n- Collector tier: ${collectorTier}` : ''}
 
-JSON:
+Write a thesis that covers:
+1. What makes THIS specific version of ${firstName} interesting or not — the art treatment, the set it's from, the character's place in the franchise, anything that distinguishes this card from other versions of the same character
+2. Whether the current price makes sense given real collector demand for this specific card (not just the rarity bucket)
+3. A direct, honest verdict — what should a collector actually do right now, and what would change your view
+
+AVOID: rigid formulas, rephrasing the benchmark numbers without adding insight, phrases like "risk-reward favors entry" or "multiple price levels ahead", generic artist tier labels, or anything that could apply equally to every card of this rarity.
+
+Return ONLY this JSON:
 {
-  "thesis": "4 sentences: (1) lifecycle timing, (2) price vs benchmarks with specific numbers, (3) collector appeal in general terms, (4) clear verdict — buy/accumulate/wait/avoid and why.",
+  "thesis": "<3-5 sentences of specific, candid analysis about this exact card. Be direct and concrete — name what's actually interesting or concerning.>",
   "comparable": {
-    "name": "Real card 100% certain to exist. Empty string if any doubt.",
-    "reason": "1 sentence why it is a comparable by archetype.",
-    "tcgplayerUrl": "https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent((name||'').split(' ')[0])}&view=grid"
+    "name": "<A real card you are certain exists, with the exact name. Empty string if any doubt — do not guess.>",
+    "reason": "<One sentence on why it's comparable — same character archetype, similar price history, or analogous market position.>",
+    "tcgplayerUrl": "https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(firstName)}&view=grid"
   },
   "reprintRisk": {
-    "level": "Low or Medium or High or Very High",
-    "score": 30,
-    "reasoning": "2-3 sentences on reprint likelihood based on character frequency in SIRs.",
-    "factors": ["Factor 1", "Factor 2"]
+    "level": "<Low or Medium or High or Very High>",
+    "score": <0-100>,
+    "reasoning": "<2 sentences specific to this character — how often has ${firstName} appeared in SIRs or SARs? What does that history say about this version's long-term value?>",
+    "factors": ["<Specific factor 1>", "<Specific factor 2>"]
   }
 }`;
 
@@ -173,7 +181,14 @@ JSON:
     const e       = cleaned.lastIndexOf('}');
     if (s === -1 || e === -1) throw new Error('No JSON in response');
 
-    const result = JSON.parse(cleaned.slice(s, e + 1));
+    const jsonStr = cleaned.slice(s, e + 1);
+    let result;
+    try {
+      result = JSON.parse(jsonStr);
+    } catch {
+      // Claude sometimes writes literal newlines inside JSON strings — collapse them
+      result = JSON.parse(jsonStr.replace(/[\n\r]/g, ' '));
+    }
     if (!result.thesis) throw new Error('Missing thesis');
 
     res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=172800');

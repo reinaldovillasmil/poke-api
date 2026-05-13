@@ -2,9 +2,16 @@
   "name": "pokeinvest-api",
   "version": "3.0.0",
   "description": "PokeInvest backend v3 — AI-powered card investment scoring",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
   "dependencies": {
     "node-fetch": "^2.7.0",
     "cheerio": "^1.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   },
   "engines": { "node": "24.x" }
 }

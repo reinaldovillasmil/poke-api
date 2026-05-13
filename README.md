@@ -39,6 +39,29 @@ TCGPlayer estimates for price signals. This matters because:
 - eBay includes more price discovery (auctions, best offers)
 - 7-day vs 30-day trend tells you if a card is actively moving
 
+## Local Development
+
+### Setup
+```bash
+# Install dependencies
+npm install
+
+# Start local dev server
+npm run dev
+```
+
+Your API will be available at **http://localhost:3000**
+
+### Environment Variables
+Copy `.env.example` to `.env` and customize if needed:
+```bash
+cp .env.example .env
+```
+
+The server will auto-reload when you edit files in the `api/` or `lib/` directories.
+
+---
+
 ## Deploy to Vercel (free, 5 minutes)
 
 ### 1. Push to GitHub
