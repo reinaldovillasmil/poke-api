@@ -17,48 +17,56 @@ const SECRET_RARITIES = [
   'Special Illustration Rare',
   'Illustration Rare',
   'Hyper Rare',
-  // SWSH era — rainbow/gold/secret + Full Art V/VMAX/VSTAR
+  'Mega Hyper Rare',             // newest SV sets (2026)
+  // SWSH era
   'Rainbow Rare',
   'Secret Rare',
   'Full Art',
-  'Rare Holo VMAX',       // Umbreon VMAX, Charizard VMAX Alt Art etc.
-  'Rare Holo VSTAR',      // Charizard VSTAR, Arceus VSTAR etc.
-  'Trainer Gallery Rare Holo', // Crown Zenith & Brilliant Stars trainer gallery
-  // SM era — GX Full Arts, Tag Teams, Rainbow Rares, Hidden Fates shinies
-  'Rare Ultra',           // THE big one: BW/XY/SM Full Art EX/GX/V + trainer FAs
-  'Rare Rainbow',         // SM-era rainbow rares (Charizard-GX rainbow etc.)
-  'Rare Shiny GX',        // Hidden Fates Shiny Vault GX cards
+  'Rare Holo VMAX',              // Umbreon VMAX Alt Art, Charizard VMAX etc.
+  'Rare Holo VSTAR',             // Charizard VSTAR, Arceus VSTAR etc.
+  'Trainer Gallery Rare Holo',   // Crown Zenith & Brilliant Stars TG cards
+  // SM / BW / XY era
+  'Rare Ultra',                  // N Full Art, Cynthia FA, all EX/GX/V Full Arts
+  'Rare Rainbow',                // SM-era rainbow rares
+  'Rare Shiny GX',               // Hidden Fates Shiny Vault
 ];
 
-// Full rotation of fetch configs — 6 are randomly sampled per pool build
-// so each rebuild surfaces a different mix of eras and card ranges.
-const ALL_POOL_CONFIGS = [
-  // Newest-first: pages 1–5 cover SV → SWSH → older as page increases
+// Era-bucketed configs — 2 from each bucket are randomly picked every build.
+// This GUARANTEES old and new cards appear together in every pool rebuild.
+const MODERN_CONFIGS = [           // SV / newest sets
   { apiSort: '-set.releaseDate', apiPage: 1 },
   { apiSort: '-set.releaseDate', apiPage: 2 },
   { apiSort: '-set.releaseDate', apiPage: 3 },
   { apiSort: '-set.releaseDate', apiPage: 4 },
   { apiSort: '-set.releaseDate', apiPage: 5 },
-  // Oldest-first: pages 1–4 go from vintage BW/XY through SM and into SWSH
+];
+const OLDER_CONFIGS = [            // BW / XY / SM era (oldest first)
   { apiSort: 'set.releaseDate',  apiPage: 1 },
   { apiSort: 'set.releaseDate',  apiPage: 2 },
   { apiSort: 'set.releaseDate',  apiPage: 3 },
   { apiSort: 'set.releaseDate',  apiPage: 4 },
-  // Name A–Z / Z–A across two pages each = four different alphabet windows
-  { apiSort: 'name',  apiPage: 1 },
-  { apiSort: 'name',  apiPage: 2 },
-  { apiSort: '-name', apiPage: 1 },
-  { apiSort: '-name', apiPage: 2 },
-  // Set name order mixes eras alphabetically (Aquapolis, Base Set, Crown Zenith…)
+];
+const MIXED_CONFIGS = [            // name / set / number sorts — mixes all eras
+  { apiSort: 'name',    apiPage: 1 },
+  { apiSort: 'name',    apiPage: 2 },
+  { apiSort: '-name',   apiPage: 1 },
+  { apiSort: '-name',   apiPage: 2 },
+  { apiSort: '-number', apiPage: 1 },
   { apiSort: 'set.name',  apiPage: 1 },
   { apiSort: '-set.name', apiPage: 1 },
-  // High card numbers = secret/special slots within every set
-  { apiSort: '-number', apiPage: 1 },
 ];
 
-const CONFIGS_PER_BUILD = 6;         // random configs sampled each rebuild
-const POOL_TTL          = 10 * 60 * 1000; // 10 minutes (~864 API calls/day)
-const SAMPLE_SIZE       = 150;        // cards returned per request
+// Always 2 modern + 2 older + 2 mixed = 6 fetches, ~864 req/day at 10-min TTL
+function selectConfigs() {
+  return [
+    ...fisherYates([...MODERN_CONFIGS]).slice(0, 2),
+    ...fisherYates([...OLDER_CONFIGS]).slice(0, 2),
+    ...fisherYates([...MIXED_CONFIGS]).slice(0, 2),
+  ];
+}
+
+const POOL_TTL   = 10 * 60 * 1000; // 10 minutes (~864 API calls/day)
+const SAMPLE_SIZE = 150;            // cards returned per request
 
 let _pool          = [];
 let _poolFetchedAt = 0;
@@ -68,8 +76,8 @@ async function buildPool() {
   if (_poolBuilding) return; // prevent concurrent refreshes
   _poolBuilding = true;
   try {
-    // Pick a different random 6 configs each build so the pool varies across rebuilds
-    const configs = fisherYates([...ALL_POOL_CONFIGS]).slice(0, CONFIGS_PER_BUILD);
+    // 2 modern + 2 older + 2 mixed — guaranteed era diversity every rebuild
+    const configs = selectConfigs();
     const results = await Promise.allSettled(
       configs.map(c => fetchSecretRares(SECRET_RARITIES, c.apiPage, c.apiSort))
     );
